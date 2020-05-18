@@ -1,0 +1,5 @@
+---
+root_target: /target
+
+pacman_sysupgrade: true
+pacman_config: /etc/pacman.conf

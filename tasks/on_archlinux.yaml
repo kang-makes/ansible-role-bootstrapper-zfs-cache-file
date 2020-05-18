@@ -1,0 +1,3 @@
+---
+- name: Create init image
+  command: "{% if not ansible_local.bootstrapped | default(false) %}chroot {{ root_target }} {% endif %}mkinitcpio -P"

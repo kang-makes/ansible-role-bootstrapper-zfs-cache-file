@@ -1,0 +1,64 @@
+---
+- name: Reset/create zpool cache files
+  block:
+  - name: Unsetting any cache file on zpools
+    command: "zpool set cachefile=none {{ item }}"
+    with_items: "{{ ansible_local.disk_layout | json_query(\"[?step=='zpool'].name\") }}"
+
+  - name: Deleting old cache file
+    file:
+      path: /etc/zfs/zpool.cache
+      state: absent
+
+  - name: Creating zfs cache directory
+    file:
+      path: "{% if not ansible_local.bootstrapped | default(false) %}{{root_target}}{% endif %}/etc/zfs"
+      mode: "0775"
+      state: directory
+
+  - name: Creating new cache files
+    command: "zpool set cachefile=/etc/zfs/zpool.cache {{ item }}"
+    with_items: "{{ ansible_local.disk_layout | json_query(\"[?step=='zpool'].name\") }}"
+
+  - name: Move cache file to target systems
+    copy:
+      src: /etc/zfs/zpool.cache
+      dest: "{{root_target}}/etc/zfs/zpool.cache"
+      remote_src: yes
+    when: not ansible_local.bootstrapped | default(false)
+
+  - name: Preparing chroot environment if not bootstrapped
+    command:
+      warn: no
+      argv: [ "mount", "{{ item.src }}", "{{ root_target + item.path }}", "-t", "{{ item.fstype }}", "-o", "{{ item.opts }},x-mount.mkdir" ]
+    changed_when: no
+    loop: "{{ chroot_mounts }}"
+    when: not ansible_local.bootstrapped | default(false)
+
+  - name: Mounting not mounted filesystems
+    command:
+      warn: no
+      argv: [ "mount", "{{ item.src }}", "{{ item.path }}", "-t", "{{ item.fstype }}", "-o", "{{ item.opts }},x-mount.mkdir" ]
+    changed_when: no
+    loop: "{{ to_mount }}"
+
+  - name: Rebuild initcpio with the new cachefile
+    include_tasks: "on_{{ ansible_distribution|lower }}.yaml"
+
+  always:
+  - name: Unmounting filesystems previously not mounted
+    command:
+      warn: no
+      argv: [ "umount", "{{ item.path }}" ]
+    changed_when: no
+    loop: "{{ to_mount[::-1] | default ([])}}"
+
+  - name: Unmounting chroot environment on not bootstrapped systems
+    command:
+      warn: no
+      argv: [ "umount", "-l", "{{ root_target + item.path }}" ]
+    changed_when: no
+    loop: "{{ chroot_mounts[::-1] }}"
+    when: not ansible_local.bootstrapped | default(false)
+
+  when: system_uses_zfs
